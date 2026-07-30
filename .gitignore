@@ -1,3 +1,26 @@
 .DS_Store
 
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Python environments and generated files
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Editor and Streamlit local state
+.vscode/
+.idea/
+.streamlit/secrets.toml
 
