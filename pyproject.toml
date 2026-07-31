@@ -32,6 +32,8 @@ test = "scripts.commands:test"
 run-api = "scripts.commands:run_api"
 run-dashboard = "scripts.commands:run_dashboard"
 run-simulator = "scripts.commands:run_simulator"
+init-db = "scripts.commands:init_db"
+seed-data = "scripts.commands:seed_data"
 
 [build-system]
 requires = ["hatchling>=1.26"]
