@@ -1,6 +1,6 @@
 # 实时电商 A/B 测试与归因分析看板
 
-基于 Supabase Postgres、FastAPI、Streamlit 与 Plotly 的实时电商 A/B 测试与归因分析 Demo。当前完成 M1：可初始化的数据底座、14 天历史模拟数据与持续事件模拟器；指标 API 与完整看板将在后续里程碑加入。
+基于 Supabase Postgres、FastAPI、Streamlit 与 Plotly 的实时电商 A/B 测试与归因分析 Demo。当前完成 M2：可初始化的数据底座、14 天历史模拟数据、持续事件模拟器，以及核心指标与漏斗 API；完整看板将在后续里程碑加入。
 
 ## 前置条件
 
@@ -45,6 +45,22 @@ Docker 与 Supabase CLI 均为可选工具，M0 不依赖它们。
    ```
 
    如果 Supabase 不可连接，接口返回 HTTP 503 与 `database_unavailable`；响应不会包含数据库连接串或密钥。
+
+   M2 API 文档可在 `http://localhost:8000/docs` 查看。所有分析时间均须传入带时区的 ISO 8601 字符串，且按 UTC 左闭右开区间 `[start_time, end_time)` 计算。例如：
+
+   ```bash
+   curl -G 'http://localhost:8000/api/metrics' \
+     --data-urlencode 'start_time=2026-07-30T00:00:00+00:00' \
+     --data-urlencode 'end_time=2026-07-31T00:00:00+00:00' \
+     --data-urlencode 'granularity=hour' \
+     --data-urlencode 'experiment_group=A'
+
+   curl -G 'http://localhost:8000/api/funnel' \
+     --data-urlencode 'start_time=2026-07-30T00:00:00+00:00' \
+     --data-urlencode 'end_time=2026-07-31T00:00:00+00:00'
+   ```
+
+   `/api/metrics` 返回 DAU、GMV、订单数、购买转化率、AOV 与小时/天趋势；`/api/funnel` 返回 click、add_to_cart、buy 各步去重人数、转化/流失率和数据质量标记。金额为数值，比例为 `0~1` 小数；零分母的比例和 AOV 均返回 `null`。非法窗口、粒度或实验组返回 422。
 
 5. 在另一个终端启动看板：
 
