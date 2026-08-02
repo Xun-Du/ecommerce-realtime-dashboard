@@ -1,1 +1,1 @@
-"""Reusable dashboard components will be introduced in M4."""
+"""Reusable Streamlit dashboard components."""

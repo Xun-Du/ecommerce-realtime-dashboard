@@ -3,6 +3,7 @@
 import logging
 from datetime import datetime, timedelta
 from decimal import Decimal
+from itertools import pairwise
 from typing import Literal
 
 from sqlalchemy import text
@@ -96,7 +97,7 @@ def get_funnel(
         experiment_group=experiment_group,
         steps=steps,
         has_data_quality_issue=any(
-            current > previous for previous, current in zip(counts, counts[1:], strict=True)
+            current > previous for previous, current in pairwise(counts)
         ),
     )
 
@@ -204,7 +205,8 @@ def _fetch_all(
 def _where_clause() -> str:
     return (
         "created_at >= :start_time AND created_at < :end_time "
-        "AND (:experiment_group IS NULL OR experiment_group = :experiment_group)"
+        "AND (CAST(:experiment_group AS VARCHAR) IS NULL "
+        "OR experiment_group = CAST(:experiment_group AS VARCHAR))"
     )
 
 

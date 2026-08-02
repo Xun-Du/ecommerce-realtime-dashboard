@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from backend.app.main import app
 from backend.app.services.analytics import (
     AnalyticsDatabaseUnavailable,
+    _where_clause,
     get_experiment,
     get_funnel,
     get_metrics,
@@ -74,6 +75,14 @@ def test_metrics_returns_null_rates_when_denominators_are_zero(monkeypatch) -> N
     assert result.trends == []
 
 
+def test_group_filter_clause_types_the_optional_null_parameter() -> None:
+    """PostgreSQL must know the parameter type when the dashboard selects all groups."""
+    clause = _where_clause()
+
+    assert "CAST(:experiment_group AS VARCHAR) IS NULL" in clause
+    assert "experiment_group = CAST(:experiment_group AS VARCHAR)" in clause
+
+
 def test_funnel_reports_drop_off_and_data_quality_issues(monkeypatch) -> None:
     monkeypatch.setattr(
         "backend.app.services.analytics._fetch_all",
@@ -88,6 +97,18 @@ def test_funnel_reports_drop_off_and_data_quality_issues(monkeypatch) -> None:
     assert result.steps[1].drop_off_users_from_previous == 0
     assert result.steps[2].drop_off_users_from_previous == 9
     assert result.steps[2].drop_off_rate_from_previous == Decimal("0.75")
+
+
+def test_funnel_accepts_a_monotonic_three_step_funnel(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "backend.app.services.analytics._fetch_all",
+        lambda *_: [{"click_users": 100, "cart_users": 40, "buy_users": 15}],
+    )
+
+    result = get_funnel(START, END, None)
+
+    assert result.has_data_quality_issue is False
+    assert [step.users for step in result.steps] == [100, 40, 15]
 
 
 def test_experiment_returns_significant_positive_result(monkeypatch) -> None:

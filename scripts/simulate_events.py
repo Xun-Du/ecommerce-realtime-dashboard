@@ -16,7 +16,8 @@ from scripts.data_generator import generate_batch
 
 LOGGER = logging.getLogger(__name__)
 RUNNING = True
-BATCH_SIZE = 100
+# Keep the live stream visible without overwhelming the seeded historical trend.
+BATCH_SIZE = 5
 
 
 def stop(_: int, __: object) -> None:
