@@ -1,4 +1,4 @@
-"""M2 service and HTTP contract tests without a live PostgreSQL dependency."""
+"""Analytics service and HTTP contract tests without a live PostgreSQL dependency."""
 
 import logging
 from datetime import UTC, datetime
@@ -9,12 +9,14 @@ from fastapi.testclient import TestClient
 from backend.app.main import app
 from backend.app.services.analytics import (
     AnalyticsDatabaseUnavailable,
+    get_experiment,
     get_funnel,
     get_metrics,
 )
 from backend.app.services.analytics import (
     logger as analytics_logger,
 )
+from backend.app.services.experiment import decision_for, evaluate_proportions
 
 START = datetime(2026, 7, 30, tzinfo=UTC)
 END = datetime(2026, 7, 31, tzinfo=UTC)
@@ -88,6 +90,108 @@ def test_funnel_reports_drop_off_and_data_quality_issues(monkeypatch) -> None:
     assert result.steps[2].drop_off_rate_from_previous == Decimal("0.75")
 
 
+def test_experiment_returns_significant_positive_result(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "backend.app.services.analytics._fetch_all",
+        lambda *_: [
+            {
+                "experiment_group": "A",
+                "click_users": 1000,
+                "cart_users": 200,
+                "purchase_users": 100,
+                "order_count": 110,
+                "gmv": Decimal("2200"),
+            },
+            {
+                "experiment_group": "B",
+                "click_users": 1000,
+                "cart_users": 300,
+                "purchase_users": 180,
+                "order_count": 190,
+                "gmv": Decimal("4180"),
+            },
+        ],
+    )
+
+    result = get_experiment(START, END)
+
+    assert result.groups["A"].conversion_rate == Decimal("0.1")
+    assert result.groups["B"].add_to_cart_rate == Decimal("0.3")
+    assert result.uplift == Decimal("0.8")
+    assert result.p_value is not None and result.p_value < Decimal("0.05")
+    assert result.decision.code == "significantly_better"
+    assert result.decision.level == "success"
+
+
+def test_experiment_handles_missing_groups_and_zero_denominators(monkeypatch) -> None:
+    monkeypatch.setattr("backend.app.services.analytics._fetch_all", lambda *_: [])
+
+    result = get_experiment(START, END)
+
+    assert result.groups["A"].conversion_rate is None
+    assert result.groups["B"].aov is None
+    assert result.uplift is None
+    assert result.p_value is None
+    assert result.decision.code == "insufficient_sample"
+
+
+def test_experiment_does_not_publish_p_value_before_minimum_sample(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "backend.app.services.analytics._fetch_all",
+        lambda *_: [
+            {
+                "experiment_group": "A",
+                "click_users": 99,
+                "cart_users": 20,
+                "purchase_users": 10,
+                "order_count": 10,
+                "gmv": Decimal("100"),
+            },
+            {
+                "experiment_group": "B",
+                "click_users": 100,
+                "cart_users": 40,
+                "purchase_users": 30,
+                "order_count": 30,
+                "gmv": Decimal("300"),
+            },
+        ],
+    )
+
+    result = get_experiment(START, END)
+
+    assert result.uplift is not None
+    assert result.p_value is None
+    assert result.decision.code == "insufficient_sample"
+
+
+def test_experiment_decision_priority_and_statistical_edge_cases() -> None:
+    positive = evaluate_proportions(1000, 100, 1000, 180)
+    negative = evaluate_proportions(1000, 180, 1000, 100)
+    equal_zero = evaluate_proportions(1000, 0, 1000, 0)
+
+    assert positive.p_value is not None and positive.p_value < Decimal("0.05")
+    assert negative.uplift is not None and negative.uplift < 0
+    assert equal_zero.uplift is None
+    assert equal_zero.p_value == Decimal("1")
+    assert decision_for(
+        clicks_a=1000,
+        clicks_b=1000,
+        minimum_sample_size=100,
+        rate_a=Decimal("0.18"),
+        rate_b=Decimal("0.1"),
+        p_value=negative.p_value,
+    ).code == "significantly_worse"
+    assert decision_for(
+        clicks_a=1000,
+        clicks_b=1000,
+        minimum_sample_size=100,
+        rate_a=Decimal("0.1"),
+        rate_b=Decimal("0.105"),
+        p_value=Decimal("0.8"),
+    ).code == "no_significant_difference"
+
+
 def test_analytics_api_validates_queries_and_maps_database_failure(monkeypatch) -> None:
     with TestClient(app) as client:
         missing_parameters = client.get("/api/metrics")
@@ -144,6 +248,33 @@ def test_metrics_api_serializes_decimals_as_json_numbers(monkeypatch) -> None:
     assert isinstance(body["aov"], float)
 
 
+def test_experiment_api_serializes_and_maps_database_failure(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "backend.app.api.analytics.get_experiment",
+        lambda *_: get_experiment_from_rows(),
+    )
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/experiment", params={"start_time": START.isoformat(), "end_time": END.isoformat()}
+        )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["groups"]["A"]["gmv"] == 12.34
+    assert isinstance(body["uplift"], float)
+    assert body["decision"]["code"] == "significantly_better"
+
+    def unavailable(*_: object) -> None:
+        raise AnalyticsDatabaseUnavailable
+
+    monkeypatch.setattr("backend.app.api.analytics.get_experiment", unavailable)
+    with TestClient(app) as client:
+        unavailable_response = client.get(
+            "/api/experiment", params={"start_time": START.isoformat(), "end_time": END.isoformat()}
+        )
+    assert unavailable_response.status_code == 503
+
+
 def test_database_failure_emits_structured_context(caplog, monkeypatch) -> None:
     def unavailable_engine():
         raise __import__("sqlalchemy.exc", fromlist=["SQLAlchemyError"]).SQLAlchemyError("offline")
@@ -184,9 +315,48 @@ def get_metrics_from_rows():
     )
 
 
-def test_openapi_includes_m2_contracts() -> None:
+def get_experiment_from_rows():
+    """Construct a fixed M3 response without a database for serialization tests."""
+    from backend.app.schemas.analytics import (
+        ExperimentDecision,
+        ExperimentGroupMetrics,
+        ExperimentResponse,
+    )
+
+    group = ExperimentGroupMetrics(
+        click_users=100,
+        add_to_cart_users=20,
+        purchase_users=10,
+        conversion_rate=Decimal("0.1"),
+        add_to_cart_rate=Decimal("0.2"),
+        gmv=Decimal("12.34"),
+        aov=Decimal("12.34"),
+        order_count=1,
+    )
+    return ExperimentResponse(
+        experiment_id="homepage_checkout_v1",
+        primary_metric="purchase_conversion_rate",
+        minimum_sample_size=100,
+        start_time=START,
+        end_time=END,
+        groups={"A": group, "B": group},
+        uplift=Decimal("0.1"),
+        p_value=Decimal("0.01"),
+        decision=ExperimentDecision(
+            code="significantly_better", message="test", level="success"
+        ),
+    )
+
+
+def test_openapi_includes_analytics_contracts() -> None:
     with TestClient(app) as client:
         schema = client.get("/openapi.json").json()
 
     assert "/api/metrics" in schema["paths"]
     assert "/api/funnel" in schema["paths"]
+    assert "/api/experiment" in schema["paths"]
+    experiment_parameters = schema["paths"]["/api/experiment"]["get"]["parameters"]
+    assert {parameter["name"] for parameter in experiment_parameters} == {
+        "start_time",
+        "end_time",
+    }

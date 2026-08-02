@@ -1,6 +1,6 @@
 # 实时电商 A/B 测试与归因分析看板
 
-基于 Supabase Postgres、FastAPI、Streamlit 与 Plotly 的实时电商 A/B 测试与归因分析 Demo。当前完成 M2：可初始化的数据底座、14 天历史模拟数据、持续事件模拟器，以及核心指标与漏斗 API；完整看板将在后续里程碑加入。
+基于 Supabase Postgres、FastAPI、Streamlit 与 Plotly 的实时电商 A/B 测试与归因分析 Demo。当前完成 M3：可初始化的数据底座、14 天历史模拟数据、持续事件模拟器、核心指标/漏斗 API，以及 A/B 实验评估接口；完整看板将在后续里程碑加入。
 
 ## 前置条件
 
@@ -58,9 +58,15 @@ Docker 与 Supabase CLI 均为可选工具，M0 不依赖它们。
    curl -G 'http://localhost:8000/api/funnel' \
      --data-urlencode 'start_time=2026-07-30T00:00:00+00:00' \
      --data-urlencode 'end_time=2026-07-31T00:00:00+00:00'
+
+   curl -G 'http://localhost:8000/api/experiment' \
+     --data-urlencode 'start_time=2026-07-30T00:00:00+00:00' \
+     --data-urlencode 'end_time=2026-07-31T00:00:00+00:00'
    ```
 
-   `/api/metrics` 返回 DAU、GMV、订单数、购买转化率、AOV 与小时/天趋势；`/api/funnel` 返回 click、add_to_cart、buy 各步去重人数、转化/流失率和数据质量标记。金额为数值，比例为 `0~1` 小数；零分母的比例和 AOV 均返回 `null`。非法窗口、粒度或实验组返回 422。
+   `/api/metrics` 返回 DAU、GMV、订单数、购买转化率、AOV 与小时/天趋势；`/api/funnel` 返回 click、add_to_cart、buy 各步去重人数、转化/流失率和数据质量标记；`/api/experiment` 比较 A/B 两组的购买转化率、GMV、AOV、加购率和订单数，并返回 uplift、双侧双比例 z 检验的 p-value 与业务结论。金额为数值，比例为 `0~1` 小数；零分母的比例和 AOV 均返回 `null`。非法窗口、粒度或实验组返回 422。
+
+   实验主指标是购买转化率（购买去重用户数／点击去重用户数），默认最小样本量为每组 100 名点击用户。任一组不足时仅建议继续观察；样本充足时，`p-value < 0.05` 且 B 组更高表示“显著优于”，更低表示“显著低于”，其余为“无显著差异”。p-value 只衡量随机波动的证据，最终业务判断仍应结合 uplift、GMV、样本量与策略风险。
 
 5. 在另一个终端启动看板：
 

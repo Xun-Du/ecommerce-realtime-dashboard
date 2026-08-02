@@ -1,4 +1,4 @@
-"""HTTP routes for M2 overview metrics and conversion funnels."""
+"""HTTP routes for analytics metrics, funnels, and experiment evaluation."""
 
 from datetime import datetime
 from typing import Annotated, Literal
@@ -8,12 +8,19 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 
 from backend.app.schemas.analytics import (
+    ExperimentResponse,
+    ExperimentTimeWindowQuery,
     FunnelResponse,
     MetricsQuery,
     MetricsResponse,
     TimeWindowQuery,
 )
-from backend.app.services.analytics import AnalyticsDatabaseUnavailable, get_funnel, get_metrics
+from backend.app.services.analytics import (
+    AnalyticsDatabaseUnavailable,
+    get_experiment,
+    get_funnel,
+    get_metrics,
+)
 
 router = APIRouter(prefix="/api", tags=["analytics"])
 
@@ -58,6 +65,16 @@ def metrics_query(
         raise RequestValidationError(exc.errors()) from None
 
 
+def experiment_time_window_query(
+    start_time: Annotated[datetime, Query()], end_time: Annotated[datetime, Query()]
+) -> ExperimentTimeWindowQuery:
+    """Validate the experiment window without exposing an individual group filter."""
+    try:
+        return ExperimentTimeWindowQuery(start_time=start_time, end_time=end_time)
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors()) from None
+
+
 @router.get("/metrics", response_model=MetricsResponse)
 def metrics(query: Annotated[MetricsQuery, Depends(metrics_query)]) -> MetricsResponse:
     try:
@@ -70,5 +87,15 @@ def metrics(query: Annotated[MetricsQuery, Depends(metrics_query)]) -> MetricsRe
 def funnel(query: Annotated[TimeWindowQuery, Depends(time_window_query)]) -> FunnelResponse:
     try:
         return get_funnel(**query.model_dump())
+    except AnalyticsDatabaseUnavailable:
+        raise database_unavailable() from None
+
+
+@router.get("/experiment", response_model=ExperimentResponse)
+def experiment(
+    query: Annotated[ExperimentTimeWindowQuery, Depends(experiment_time_window_query)]
+) -> ExperimentResponse:
+    try:
+        return get_experiment(query.start_time, query.end_time)
     except AnalyticsDatabaseUnavailable:
         raise database_unavailable() from None

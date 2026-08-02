@@ -1,4 +1,4 @@
-"""Database-backed business calculations for M2 metrics and funnels."""
+"""Database-backed business calculations for metrics, funnels, and experiments."""
 
 import logging
 from datetime import datetime, timedelta
@@ -9,9 +9,19 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend.app.core.database import get_engine
-from backend.app.schemas.analytics import FunnelResponse, FunnelStep, MetricsResponse, TrendPoint
+from backend.app.schemas.analytics import (
+    ExperimentGroupMetrics,
+    ExperimentResponse,
+    FunnelResponse,
+    FunnelStep,
+    MetricsResponse,
+    TrendPoint,
+)
+from backend.app.services.experiment import decision_for, evaluate_proportions
 
 ZERO = Decimal("0")
+DEFAULT_EXPERIMENT_ID = "homepage_checkout_v1"
+MINIMUM_EXPERIMENT_SAMPLE_SIZE = 100
 EventGroup = Literal["A", "B"] | None
 logger = logging.getLogger("dashboard.analytics")
 
@@ -91,6 +101,47 @@ def get_funnel(
     )
 
 
+def get_experiment(start_time: datetime, end_time: datetime) -> ExperimentResponse:
+    """Evaluate the default A/B experiment over a selected time window."""
+    rows = _fetch_all(_experiment_statement(), start_time, end_time, None)
+    by_group = {row["experiment_group"]: row for row in rows}
+    groups = {
+        group: _experiment_group_metrics(by_group.get(group, {})) for group in ("A", "B")
+    }
+    rate_a = groups["A"].conversion_rate
+    rate_b = groups["B"].conversion_rate
+    test = evaluate_proportions(
+        groups["A"].click_users,
+        groups["A"].purchase_users,
+        groups["B"].click_users,
+        groups["B"].purchase_users,
+    )
+    p_value = (
+        test.p_value
+        if groups["A"].click_users >= MINIMUM_EXPERIMENT_SAMPLE_SIZE
+        and groups["B"].click_users >= MINIMUM_EXPERIMENT_SAMPLE_SIZE
+        else None
+    )
+    return ExperimentResponse(
+        experiment_id=DEFAULT_EXPERIMENT_ID,
+        primary_metric="purchase_conversion_rate",
+        minimum_sample_size=MINIMUM_EXPERIMENT_SAMPLE_SIZE,
+        start_time=start_time,
+        end_time=end_time,
+        groups=groups,
+        uplift=test.uplift,
+        p_value=p_value,
+        decision=decision_for(
+            clicks_a=groups["A"].click_users,
+            clicks_b=groups["B"].click_users,
+            minimum_sample_size=MINIMUM_EXPERIMENT_SAMPLE_SIZE,
+            rate_a=rate_a,
+            rate_b=rate_b,
+            p_value=p_value,
+        ),
+    )
+
+
 def _metric_values(row: dict) -> dict:
     order_count = int(row["order_count"] or 0)
     click_users = int(row["click_users"] or 0)
@@ -109,6 +160,24 @@ def _ratio(numerator: int | Decimal, denominator: int | Decimal | None) -> Decim
     if denominator is None or denominator == 0:
         return None
     return Decimal(numerator) / Decimal(denominator)
+
+
+def _experiment_group_metrics(row: dict) -> ExperimentGroupMetrics:
+    click_users = int(row.get("click_users") or 0)
+    cart_users = int(row.get("cart_users") or 0)
+    purchase_users = int(row.get("purchase_users") or 0)
+    order_count = int(row.get("order_count") or 0)
+    gmv = Decimal(row.get("gmv") or 0)
+    return ExperimentGroupMetrics(
+        click_users=click_users,
+        add_to_cart_users=cart_users,
+        purchase_users=purchase_users,
+        conversion_rate=_ratio(purchase_users, click_users),
+        add_to_cart_rate=_ratio(cart_users, click_users),
+        gmv=gmv,
+        aov=_ratio(gmv, order_count),
+        order_count=order_count,
+    )
 
 
 def _fetch_one(statement: str, start_time: datetime, end_time: datetime, group: EventGroup) -> dict:
@@ -169,4 +238,19 @@ def _funnel_statement() -> str:
                COUNT(DISTINCT user_id) FILTER (WHERE event_type = 'add_to_cart') AS cart_users,
                COUNT(DISTINCT user_id) FILTER (WHERE event_type = 'buy') AS buy_users
         FROM events WHERE {_where_clause()}
+    """
+
+
+def _experiment_statement() -> str:
+    return """
+        SELECT experiment_group,
+               COUNT(DISTINCT user_id) FILTER (WHERE event_type = 'click') AS click_users,
+               COUNT(DISTINCT user_id) FILTER (WHERE event_type = 'add_to_cart') AS cart_users,
+               COUNT(DISTINCT user_id) FILTER (WHERE event_type = 'buy') AS purchase_users,
+               COUNT(*) FILTER (WHERE event_type = 'buy') AS order_count,
+               COALESCE(SUM(order_value) FILTER (WHERE event_type = 'buy'), 0) AS gmv
+        FROM events
+        WHERE created_at >= :start_time AND created_at < :end_time
+          AND experiment_group IN ('A', 'B')
+        GROUP BY experiment_group
     """
