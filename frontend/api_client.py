@@ -7,7 +7,12 @@ from typing import TypeVar
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from backend.app.schemas.analytics import ExperimentResponse, FunnelResponse, MetricsResponse
+from backend.app.schemas.analytics import (
+    AttributionResponse,
+    ExperimentResponse,
+    FunnelResponse,
+    MetricsResponse,
+)
 
 
 class ApiClientError(Exception):
@@ -30,7 +35,7 @@ class ApiClient:
     """Fetch dashboard data without exposing database credentials to the frontend."""
 
     base_url: str
-    timeout_seconds: float = 10.0
+    timeout_seconds: float = 20.0
 
     def get_metrics(
         self,
@@ -58,6 +63,22 @@ class ApiClient:
             self._time_params(start_time, end_time, experiment_group=None),
             ExperimentResponse,
         )
+
+    def get_attribution(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        model: str,
+        channel: str | None = None,
+        campaign_id: str | None = None,
+    ) -> AttributionResponse:
+        params = self._time_params(start_time, end_time, experiment_group=None)
+        params["model"] = model
+        if channel is not None:
+            params["channel"] = channel
+        if campaign_id is not None:
+            params["campaign_id"] = campaign_id
+        return self._get("/api/attribution", params, AttributionResponse)
 
     @staticmethod
     def _time_params(

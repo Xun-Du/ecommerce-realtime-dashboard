@@ -66,6 +66,7 @@ def main() -> None:
         "种子数据写入完成："
         f"users={len(batch.users)}, click={counts['click']}, "
         f"add_to_cart={counts['add_to_cart']}, buy={counts['buy']}, "
+        f"assignments={len(batch.assignments)}, "
         f"A_click={group_counts['A']}, B_click={group_counts['B']}, "
         f"overall_conversion={conversion:.2%}"
     )

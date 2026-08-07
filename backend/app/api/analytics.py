@@ -8,6 +8,8 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 
 from backend.app.schemas.analytics import (
+    AttributionQuery,
+    AttributionResponse,
     ExperimentResponse,
     ExperimentTimeWindowQuery,
     FunnelResponse,
@@ -21,6 +23,7 @@ from backend.app.services.analytics import (
     get_funnel,
     get_metrics,
 )
+from backend.app.services.attribution import get_attribution
 
 router = APIRouter(prefix="/api", tags=["analytics"])
 
@@ -97,5 +100,34 @@ def experiment(
 ) -> ExperimentResponse:
     try:
         return get_experiment(query.start_time, query.end_time)
+    except AnalyticsDatabaseUnavailable:
+        raise database_unavailable() from None
+
+
+def attribution_query(
+    start_time: Annotated[datetime, Query()],
+    end_time: Annotated[datetime, Query()],
+    model: Annotated[Literal["first_touch", "last_touch", "linear"], Query()] = "last_touch",
+    channel: Annotated[str | None, Query()] = None,
+    campaign_id: Annotated[str | None, Query()] = None,
+) -> AttributionQuery:
+    try:
+        return AttributionQuery(
+            start_time=start_time,
+            end_time=end_time,
+            model=model,
+            channel=channel,
+            campaign_id=campaign_id,
+        )
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors()) from None
+
+
+@router.get("/attribution", response_model=AttributionResponse)
+def attribution(
+    query: Annotated[AttributionQuery, Depends(attribution_query)]
+) -> AttributionResponse:
+    try:
+        return get_attribution(**query.model_dump())
     except AnalyticsDatabaseUnavailable:
         raise database_unavailable() from None

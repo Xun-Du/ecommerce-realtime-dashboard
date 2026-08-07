@@ -1,8 +1,8 @@
 # 电商增长实验与营销归因平台
 
-基于 Supabase Postgres、FastAPI、Streamlit 与 Plotly 的电商增长实验与营销归因 Demo。当前完成 M4.1：可初始化的数据底座、14 天历史模拟数据、持续事件模拟器、核心指标/漏斗/实验评估 API，以及带统一导航壳层的经营看板。
+基于 Supabase Postgres、FastAPI、Streamlit 与 Plotly 的电商增长实验与营销归因 Demo。当前完成 M4.1：可初始化的数据底座、14 天历史模拟数据、持续事件模拟器、核心指标/漏斗/实验评估 API，以及带统一导航壳层的经营看板。数据层已开始向 M5/M6 演进，初始化命令会按版本迁移到新的兼容 schema。
 
-当前应用包含 Home、Monitor、Funnel 和 Experiments 四个可用模块；Attribution、Customers、Creatives、Integrations 已进入导航，但会明确显示规划状态，不请求尚未实现的 API。M5 将在此壳层上接入首次触达、末次触达和线性归因。
+当前应用包含 Home、Monitor、Attribution、Funnel 和 Experiments 五个可用模块；Customers、Creatives、Integrations 保持规划状态。M5 归因页支持首次触达、末次触达和线性归因，并可查看渠道、活动及订单触点路径示例。
 
 ## 前置条件
 
@@ -68,6 +68,17 @@ Docker 与 Supabase CLI 均为可选工具，M0 不依赖它们。
 
    `/api/metrics` 返回 DAU、GMV、订单数、购买转化率、AOV 与小时/天趋势；`/api/funnel` 返回 click、add_to_cart、buy 各步去重人数、转化/流失率和数据质量标记；`/api/experiment` 比较 A/B 两组的购买转化率、GMV、AOV、加购率和订单数，并返回 uplift、双侧双比例 z 检验的 p-value 与业务结论。金额为数值，比例为 `0~1` 小数；零分母的比例和 AOV 均返回 `null`。非法窗口、粒度或实验组返回 422。
 
+   M5 归因接口示例：
+
+   ```bash
+   curl -G 'http://localhost:8000/api/attribution' \
+     --data-urlencode 'start_time=2026-07-30T00:00:00+00:00' \
+     --data-urlencode 'end_time=2026-07-31T00:00:00+00:00' \
+     --data-urlencode 'model=linear'
+   ```
+
+   归因仅计算窗口内购买，并向前回溯 30 天的点击触点；首次触达、末次触达和线性模型均保证订单 GMV 不丢失。没有有效触点的订单显式归入 `unknown`。归因是规则化的贡献分配，不代表因果增量。
+
    实验主指标是购买转化率（购买去重用户数／点击去重用户数），默认最小样本量为每组 100 名点击用户。任一组不足时仅建议继续观察；样本充足时，`p-value < 0.05` 且 B 组更高表示“显著优于”，更低表示“显著低于”，其余为“无显著差异”。p-value 只衡量随机波动的证据，最终业务判断仍应结合 uplift、GMV、样本量与策略风险。
 
 5. 在另一个终端启动看板：
@@ -104,7 +115,7 @@ Docker 与 Supabase CLI 均为可选工具，M0 不依赖它们。
    .venv/bin/init-db
    ```
 
-   此命令可安全重复执行。它创建 `users`、`events`、`experiment_config` 三张表，并以 UPSERT 写入默认实验 `homepage_checkout_v1`。
+   此命令可安全重复执行。它会按文件名顺序应用 `sql/001_initial_schema.sql`、`sql/002_data_model_evolution.sql` 等迁移，并写入/回填默认实验 `homepage_checkout_v1`、变体、分组和新事实字段。
 
 2. 写入默认 14 天历史数据：
 
@@ -124,7 +135,7 @@ Docker 与 Supabase CLI 均为可选工具，M0 不依赖它们。
    .venv/bin/python scripts/seed_data.py --reset
    ```
 
-   `--reset` 会删除 `events`、`users` 与 `experiment_config` 的全部记录后重新创建默认配置和种子数据。该项目约定此 Supabase 实例只存放本 Demo 数据；若数据库包含其他重要数据，不要执行此命令。
+   `--reset` 会删除 `events`、`users`、`experiment_assignments` 与 `experiment_results` 的全部记录后重新创建默认配置和种子数据。该项目约定此 Supabase 实例只存放本 Demo 数据；若数据库包含其他重要数据，不要执行此命令。
 
 4. 持续写入新会话：
 

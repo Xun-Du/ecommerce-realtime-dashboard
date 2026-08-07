@@ -14,7 +14,7 @@ class NavigationItem:
 NAVIGATION_ITEMS = (
     NavigationItem("home", "Home", "经营总览"),
     NavigationItem("monitor", "Monitor", "指标监测"),
-    NavigationItem("attribution", "Attribution", "营销归因", "planned"),
+    NavigationItem("attribution", "Attribution", "营销归因"),
     NavigationItem("funnel", "Funnel", "漏斗诊断"),
     NavigationItem("customers", "Customers", "客户分析", "planned"),
     NavigationItem("experiments", "Experiments", "实验中心"),

@@ -14,6 +14,7 @@ from frontend.components.dashboard import (
     render_trends,
 )
 from frontend.navigation import NAVIGATION_ITEMS
+from frontend.pages import attribution as attribution_page
 from frontend.pages import experiments as experiments_page
 from frontend.pages import funnel as funnel_page
 from frontend.pages import monitor as monitor_page
@@ -55,8 +56,18 @@ def load_experiment(filters: DashboardFilters, api_base_url: str, refresh_nonce:
     return ApiClient(api_base_url).get_experiment(filters.start_time, filters.end_time)
 
 
+@st.cache_data(ttl=20, show_spinner=False)
+def load_attribution(
+    filters: DashboardFilters, api_base_url: str, refresh_nonce: int, model: str
+):
+    del refresh_nonce
+    return ApiClient(api_base_url).get_attribution(filters.start_time, filters.end_time, model)
+
+
 def render_filters() -> DashboardFilters:
-    now = datetime.now(UTC)
+    # Keep the rolling window stable across Streamlit reruns so cached model
+    # comparisons are reused instead of issuing three fresh requests per render.
+    now = datetime.now(UTC).replace(second=0, microsecond=0)
     window_mode = st.selectbox("时间范围", ("最近 24 小时", "最近 7 天", "自定义日期"))
     if window_mode == "最近 24 小时":
         start_time, end_time = now - timedelta(hours=24), now
@@ -131,6 +142,19 @@ def _render_page(
     if page_key == "home":
         render_dashboard_sections(filters, api_base_url, refresh_nonce)
         return
+    if page_key == "attribution":
+        responses = {}
+        errors = []
+        for model in ("first_touch", "last_touch", "linear"):
+            try:
+                responses[model] = load_attribution(filters, api_base_url, refresh_nonce, model)
+            except ApiClientError as error:
+                errors.append(str(error))
+        if responses:
+            attribution_page.render(responses)
+        if errors:
+            st.warning("部分归因模型加载失败：" + "；".join(errors))
+        return
 
     loaders_and_renderers = {
         "monitor": (load_metrics, monitor_page.render),
@@ -167,6 +191,7 @@ def render_dashboard() -> None:
             load_metrics.clear()
             load_funnel.clear()
             load_experiment.clear()
+            load_attribution.clear()
         _render_page(page_key, filters, api_base_url, st.session_state.refresh_nonce)
 
     live_page()

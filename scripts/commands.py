@@ -33,17 +33,17 @@ def run_dashboard() -> None:
 
 
 def run_simulator() -> None:
-    """Run the M1 event simulator."""
+    """Run the demo event simulator."""
     _run([sys.executable, "scripts/simulate_events.py"])
 
 
 def init_db() -> None:
-    """Create the M1 database schema."""
+    """Apply pending database migrations."""
     result = subprocess.run([sys.executable, "scripts/init_db.py"], cwd=PROJECT_ROOT, check=False)
     if result.returncode:
         raise SystemExit(result.returncode)
 
 
 def seed_data() -> None:
-    """Generate the default historical M1 data set."""
+    """Generate the default historical demo data set."""
     _run([sys.executable, "scripts/seed_data.py"])

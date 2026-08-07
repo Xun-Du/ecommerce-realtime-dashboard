@@ -143,3 +143,96 @@ class ExperimentResponse(BaseModel):
     @field_serializer("uplift", "p_value", when_used="json")
     def serialize_decimal(self, value: Decimal | None) -> float | None:
         return float(value) if value is not None else None
+
+
+AttributionModel = Literal["first_touch", "last_touch", "linear"]
+
+
+class AttributionQuery(BaseModel):
+    start_time: datetime
+    end_time: datetime
+    model: AttributionModel = "last_touch"
+    channel: str | None = Field(default=None, min_length=1, max_length=32)
+    campaign_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def validate_time_window(self) -> "AttributionQuery":
+        if self.start_time.tzinfo is None or self.end_time.tzinfo is None:
+            raise ValueError("start_time and end_time must include a timezone.")
+        if self.start_time >= self.end_time:
+            raise ValueError("start_time must be earlier than end_time.")
+        return self
+
+
+class AttributionTouchpoint(BaseModel):
+    created_at: datetime
+    channel: str
+    source: str | None = None
+    medium: str | None = None
+    campaign_id: str | None = None
+    campaign_name: str | None = None
+
+
+class AttributionChannel(BaseModel):
+    channel: str
+    order_credit: Decimal = Field(ge=0)
+    gmv_credit: Decimal = Field(ge=0)
+    gmv_share: Decimal = Field(ge=0, le=1)
+    rank: int = Field(ge=1)
+
+    @field_serializer("order_credit", "gmv_credit", "gmv_share", when_used="json")
+    def serialize_decimal(self, value: Decimal) -> float:
+        return float(value)
+
+
+class AttributionCampaign(AttributionChannel):
+    campaign_id: str | None = None
+    campaign_name: str | None = None
+
+
+class AttributionPath(BaseModel):
+    order_id: str
+    order_time: datetime
+    order_value: Decimal = Field(ge=0)
+    touchpoints: list[AttributionTouchpoint]
+
+    @field_serializer("order_value", when_used="json")
+    def serialize_decimal(self, value: Decimal) -> float:
+        return float(value)
+
+
+class AttributionDataQuality(BaseModel):
+    unknown_channel_share: Decimal = Field(ge=0, le=1)
+    missing_campaign_count: int = Field(ge=0)
+    missing_campaign_share: Decimal = Field(ge=0, le=1)
+    no_valid_touchpoint_orders: int = Field(ge=0)
+    warnings: list[str] = []
+
+    @field_serializer("unknown_channel_share", "missing_campaign_share", when_used="json")
+    def serialize_decimal(self, value: Decimal) -> float:
+        return float(value)
+
+
+class AttributionResponse(BaseModel):
+    start_time: datetime
+    end_time: datetime
+    lookback_start: datetime
+    model: AttributionModel
+    total_orders: int = Field(ge=0)
+    total_gmv: Decimal = Field(ge=0)
+    attributed_orders: Decimal = Field(ge=0)
+    attributed_gmv: Decimal = Field(ge=0)
+    unknown_orders: Decimal = Field(ge=0)
+    unknown_gmv: Decimal = Field(ge=0)
+    coverage_rate: Decimal = Field(ge=0, le=1)
+    channels: list[AttributionChannel]
+    campaigns: list[AttributionCampaign]
+    touchpoint_paths: list[AttributionPath]
+    data_quality: AttributionDataQuality
+
+    @field_serializer(
+        "total_gmv", "attributed_orders", "attributed_gmv", "unknown_orders",
+        "unknown_gmv", "coverage_rate", when_used="json"
+    )
+    def serialize_decimal(self, value: Decimal) -> float:
+        return float(value)

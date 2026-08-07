@@ -116,6 +116,35 @@ def _experiment_payload() -> dict:
     }
 
 
+def _attribution_payload(model: str = "last_touch") -> dict:
+    start_time, end_time = _window()
+    return {
+        "start_time": start_time.isoformat(),
+        "end_time": end_time.isoformat(),
+        "lookback_start": (start_time - timedelta(days=30)).isoformat(),
+        "model": model,
+        "total_orders": 2,
+        "total_gmv": 100,
+        "attributed_orders": 2,
+        "attributed_gmv": 100,
+        "unknown_orders": 0,
+        "unknown_gmv": 0,
+        "coverage_rate": 1,
+        "channels": [
+            {"channel": "search", "order_credit": 2, "gmv_credit": 100, "gmv_share": 1, "rank": 1}
+        ],
+        "campaigns": [],
+        "touchpoint_paths": [],
+        "data_quality": {
+            "unknown_channel_share": 0,
+            "missing_campaign_count": 0,
+            "missing_campaign_share": 0,
+            "no_valid_touchpoint_orders": 0,
+            "warnings": [],
+        },
+    }
+
+
 def test_api_client_serializes_metrics_filters(monkeypatch) -> None:
     monkeypatch.setattr("frontend.api_client.httpx.Client", _FakeHttpClient)
     _FakeHttpClient.response = httpx.Response(
@@ -152,6 +181,29 @@ def test_api_client_experiment_ignores_single_group_filter(monkeypatch) -> None:
     assert _FakeHttpClient.last_params == {
         "start_time": start_time.isoformat(),
         "end_time": end_time.isoformat(),
+    }
+
+
+def test_api_client_serializes_attribution_filters(monkeypatch) -> None:
+    monkeypatch.setattr("frontend.api_client.httpx.Client", _FakeHttpClient)
+    _FakeHttpClient.response = httpx.Response(
+        200,
+        json=_attribution_payload("linear"),
+        request=httpx.Request("GET", "http://localhost:8000/api/attribution"),
+    )
+    start_time, end_time = _window()
+
+    result = ApiClient("http://localhost:8000").get_attribution(
+        start_time, end_time, "linear", "search", "campaign-1"
+    )
+
+    assert result.model == "linear"
+    assert _FakeHttpClient.last_params == {
+        "start_time": start_time.isoformat(),
+        "end_time": end_time.isoformat(),
+        "model": "linear",
+        "channel": "search",
+        "campaign_id": "campaign-1",
     }
 
 
@@ -239,10 +291,10 @@ def test_navigation_exposes_available_and_planned_modules() -> None:
         "integrations",
     ]
     assert navigation_item("home").status == "available"
-    assert navigation_item("attribution").status == "planned"
+    assert navigation_item("attribution").status == "available"
 
 
-@pytest.mark.parametrize("page_key", ["attribution", "customers", "creatives", "integrations"])
+@pytest.mark.parametrize("page_key", ["customers", "creatives", "integrations"])
 def test_planned_pages_do_not_request_api(monkeypatch, page_key: str) -> None:
     filters = dashboard.DashboardFilters(*_window(), "hour", None, False)
     load_metrics = Mock(side_effect=AssertionError("planned page requested metrics"))
@@ -281,3 +333,18 @@ def test_monitor_page_only_requests_metrics(monkeypatch) -> None:
 
     assert rendered == ["metrics"]
     load_metrics.assert_called_once_with(filters, "http://localhost:8000", 7)
+
+
+def test_attribution_page_requests_all_models(monkeypatch) -> None:
+    filters = dashboard.DashboardFilters(*_window(), "day", None, False)
+    rendered: list[dict] = []
+    loader = Mock(side_effect=lambda *_args: _attribution_payload())
+    monkeypatch.setattr(dashboard, "load_attribution", loader)
+    monkeypatch.setattr(dashboard.attribution_page, "render", rendered.append)
+
+    dashboard._render_page("attribution", filters, "http://localhost:8000", 0)
+
+    assert loader.call_args_list[0].args[-1] == "first_touch"
+    assert loader.call_args_list[1].args[-1] == "last_touch"
+    assert loader.call_args_list[2].args[-1] == "linear"
+    assert set(rendered[0]) == {"first_touch", "last_touch", "linear"}
