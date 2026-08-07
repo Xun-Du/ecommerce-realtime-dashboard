@@ -1,6 +1,8 @@
-# 实时电商 A/B 测试与归因分析看板
+# 电商增长实验与营销归因平台
 
-基于 Supabase Postgres、FastAPI、Streamlit 与 Plotly 的实时电商 A/B 测试与归因分析 Demo。当前完成 M4：可初始化的数据底座、14 天历史模拟数据、持续事件模拟器、核心指标/漏斗/实验评估 API，以及可交互的 P0 运营看板。
+基于 Supabase Postgres、FastAPI、Streamlit 与 Plotly 的电商增长实验与营销归因 Demo。当前完成 M4.1：可初始化的数据底座、14 天历史模拟数据、持续事件模拟器、核心指标/漏斗/实验评估 API，以及带统一导航壳层的经营看板。
+
+当前应用包含 Home、Monitor、Funnel 和 Experiments 四个可用模块；Attribution、Customers、Creatives、Integrations 已进入导航，但会明确显示规划状态，不请求尚未实现的 API。M5 将在此壳层上接入首次触达、末次触达和线性归因。
 
 ## 前置条件
 
@@ -74,7 +76,7 @@ Docker 与 Supabase CLI 均为可选工具，M0 不依赖它们。
    .venv/bin/run-dashboard
    ```
 
-   打开 `http://localhost:8501`。看板默认展示最近 24 小时的经营概览、GMV/购买转化率趋势、漏斗诊断和 A/B 实验决策；顶部可筛选时间范围、趋势粒度和实验组。自动刷新默认关闭，开启后每 30 秒刷新数据区域；“立即刷新”会绕过短期缓存重新请求 API。
+   打开 `http://localhost:8501`。应用默认进入 Home，左侧导航可切换 Home、Monitor、Funnel 和 Experiments；顶部筛选会跨模块保留。Attribution、Customers、Creatives、Integrations 当前显示规划状态。自动刷新默认关闭，开启后每 30 秒刷新数据区域；“立即刷新”会绕过短期缓存重新请求 API。
 
    概览与漏斗会应用实验组筛选；实验决策始终比较完整的 A/B 两组，避免单组筛选误导结论。API 超时、不可用或响应异常时，对应模块会显示可读错误，其他模块仍可继续使用。Streamlit 只读取 `API_BASE_URL`，不会访问数据库或使用 Supabase 服务端密钥。
 

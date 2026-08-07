@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from backend.app.schemas.analytics import ExperimentResponse, FunnelResponse, MetricsResponse
+from frontend.theme import plotly_layout
 
 
 def format_currency(value: Decimal | float | None) -> str:
@@ -38,9 +39,7 @@ def render_trends(metrics: MetricsResponse) -> None:
             x=timestamps, y=[float(point.gmv) for point in metrics.trends], mode="lines+markers"
         )
     )
-    gmv_figure.update_layout(
-        title="GMV 趋势", yaxis_title="GMV（¥）", margin=dict(l=20, r=20, t=50, b=20)
-    )
+    gmv_figure.update_layout(**plotly_layout(title="GMV 趋势", yaxis_title="GMV（¥）"))
     conversion_figure = go.Figure(
         go.Scatter(
             x=timestamps,
@@ -49,7 +48,7 @@ def render_trends(metrics: MetricsResponse) -> None:
         )
     )
     conversion_figure.update_layout(
-        title="购买转化率趋势", yaxis_title="购买转化率（%）", margin=dict(l=20, r=20, t=50, b=20)
+        **plotly_layout(title="购买转化率趋势", yaxis_title="购买转化率（%）")
     )
     left, right = st.columns(2)
     left.plotly_chart(gmv_figure, use_container_width=True)
@@ -72,7 +71,7 @@ def render_funnel(funnel: FunnelResponse) -> None:
             textinfo="value+percent initial",
         )
     )
-    figure.update_layout(margin=dict(l=20, r=20, t=20, b=20))
+    figure.update_layout(**plotly_layout(margin=dict(l=20, r=20, t=20, b=20)))
     chart, details = st.columns((3, 2))
     chart.plotly_chart(figure, use_container_width=True)
     with details:

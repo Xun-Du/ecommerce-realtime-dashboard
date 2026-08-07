@@ -10,6 +10,7 @@ import pytest
 import frontend.app as dashboard
 from frontend.api_client import ApiClient, ApiRequestError, ApiResponseError
 from frontend.components.dashboard import _format_p_value, format_currency, format_percentage
+from frontend.navigation import NAVIGATION_ITEMS, navigation_item
 
 
 class _FakeHttpClient:
@@ -224,3 +225,59 @@ def test_dashboard_sections_isolate_module_failures(monkeypatch) -> None:
 
     assert rendered == ["funnel", "experiment"]
     assert errors == ["metrics down"]
+
+
+def test_navigation_exposes_available_and_planned_modules() -> None:
+    assert [item.key for item in NAVIGATION_ITEMS] == [
+        "home",
+        "monitor",
+        "attribution",
+        "funnel",
+        "customers",
+        "experiments",
+        "creatives",
+        "integrations",
+    ]
+    assert navigation_item("home").status == "available"
+    assert navigation_item("attribution").status == "planned"
+
+
+@pytest.mark.parametrize("page_key", ["attribution", "customers", "creatives", "integrations"])
+def test_planned_pages_do_not_request_api(monkeypatch, page_key: str) -> None:
+    filters = dashboard.DashboardFilters(*_window(), "hour", None, False)
+    load_metrics = Mock(side_effect=AssertionError("planned page requested metrics"))
+    load_funnel = Mock(side_effect=AssertionError("planned page requested funnel"))
+    load_experiment = Mock(side_effect=AssertionError("planned page requested experiment"))
+    rendered: list[str] = []
+
+    monkeypatch.setattr(dashboard, "load_metrics", load_metrics)
+    monkeypatch.setattr(dashboard, "load_funnel", load_funnel)
+    monkeypatch.setattr(dashboard, "load_experiment", load_experiment)
+    monkeypatch.setattr(dashboard, "render_placeholder", rendered.append)
+    monkeypatch.setattr(dashboard.st, "title", Mock())
+    monkeypatch.setattr(dashboard.st, "caption", Mock())
+
+    dashboard._render_page(page_key, filters, "http://localhost:8000", 0)
+
+    assert rendered == [page_key]
+    load_metrics.assert_not_called()
+    load_funnel.assert_not_called()
+    load_experiment.assert_not_called()
+
+
+def test_monitor_page_only_requests_metrics(monkeypatch) -> None:
+    filters = dashboard.DashboardFilters(*_window(), "day", "A", False)
+    load_metrics = Mock(return_value="metrics")
+    rendered: list[str] = []
+
+    monkeypatch.setattr(dashboard, "load_metrics", load_metrics)
+    monkeypatch.setattr(dashboard, "load_funnel", Mock())
+    monkeypatch.setattr(dashboard, "load_experiment", Mock())
+    monkeypatch.setattr(dashboard.monitor_page, "render", rendered.append)
+    monkeypatch.setattr(dashboard.st, "title", Mock())
+    monkeypatch.setattr(dashboard.st, "caption", Mock())
+
+    dashboard._render_page("monitor", filters, "http://localhost:8000", 7)
+
+    assert rendered == ["metrics"]
+    load_metrics.assert_called_once_with(filters, "http://localhost:8000", 7)
